@@ -41,15 +41,28 @@ ENV HTTP_PROXY=$HTTP_PROXY \
     no_proxy=$NO_PROXY \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    JAVA_HOME=/usr/lib/jvm/jre-21-openjdk \
-    PATH="/opt/trino/bin:/usr/lib/jvm/jre-21-openjdk/bin:${PATH}"
+    JAVA_HOME=/usr/lib/jvm/temurin-25-jdk \
+    PATH="/opt/trino/bin:/usr/lib/jvm/temurin-25-jdk/bin:${PATH}"
 
-# Java 21 LTS from EL9 AppStream + minimal runtime tools. python3 is required
-# by trino's `launcher` script (it's a python wrapper around `java`).
+# Java 25 (LTS) from Eclipse Temurin. EL9 AppStream caps at Java 21, but
+# Trino 463+ requires Java 22+. Temurin ships RPMs for EL9/UBI9.
+# Override JAVA_REPO_BASEURL on prem to point at an internal mirror.
+ARG JAVA_REPO_BASEURL=https://packages.adoptium.net/artifactory/rpm/rhel/9/x86_64
+ARG JAVA_REPO_GPG=https://packages.adoptium.net/artifactory/api/gpg/key/public
+
+# python3 is required by trino's `launcher` script (it's a python wrapper
+# around `java`).
 RUN dnf -y install --allowerasing --setopt=install_weak_deps=False \
-      java-21-openjdk-headless \
+      ca-certificates curl \
+ && curl -fsSL "${JAVA_REPO_GPG}" -o /tmp/adoptium.gpg \
+ && rpm --import /tmp/adoptium.gpg \
+ && rm -f /tmp/adoptium.gpg \
+ && printf '[Adoptium]\nname=Adoptium\nbaseurl=%s\nenabled=1\ngpgcheck=1\ngpgkey=%s\n' \
+      "${JAVA_REPO_BASEURL}" "${JAVA_REPO_GPG}" > /etc/yum.repos.d/adoptium.repo \
+ && dnf -y install --allowerasing --setopt=install_weak_deps=False \
+      temurin-25-jdk \
       python3 \
-      ca-certificates curl tar gzip less \
+      tar gzip less \
  && dnf clean all \
  && java -version
 
