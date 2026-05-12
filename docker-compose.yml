@@ -1,0 +1,27 @@
+# Standalone trino for testing the el9 runtime image.
+# Real deployments (data-platform-bootstrap) bring their own compose with
+# the iceberg/hive catalog config bind-mounted at /etc/trino/catalog/.
+
+services:
+  trino:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+      args:
+        RUNTIME_BASE_IMAGE: ${RUNTIME_BASE_IMAGE:-almalinux:9}
+        TRINO_VERSION: ${TRINO_VERSION:-466}
+        RELEASE_BASE_URL: ${RELEASE_BASE_URL:-https://github.com/kingfadzi/trino-el9/releases/download}
+    image: local/trino:${TRINO_VERSION:-466}-el9
+    container_name: trino
+    ports:
+      - "8080:8080"
+    # Override the in-image catalog dir with a host mount when you have
+    # real catalogs to wire up (iceberg pointing at lakekeeper, etc).
+    # volumes:
+    #   - ./conf/catalog:/etc/trino/catalog:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/v1/info | grep -q '\"starting\":false' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s

@@ -1,0 +1,104 @@
+# Slim on-prem runtime image for Trino.
+#
+# Pulls a prebuilt trino-server tarball (re-packaged from Maven Central in
+# the lab) from a GitHub release and assembles a RHEL 9 / AL9 runtime.
+# No compilers, no source -- runs from the published JVM distribution.
+#
+# Build:
+#   docker compose build trino
+#
+# Required build args (fed from .env via docker compose):
+#   RUNTIME_BASE_IMAGE  Bare EL9 base -- `almalinux:9` (lab) or `ubi9/ubi` (on-prem).
+#                       Java 21 is installed below from the EL9 AppStream module,
+#                       so the base image does NOT need Java preinstalled.
+#   TRINO_VERSION       Trino release tag (e.g. 466) -- must match a published release
+#                       on the configured RELEASE_BASE_URL.
+#   RELEASE_BASE_URL    e.g. https://github.com/kingfadzi/trino-el9/releases/download
+#
+# Catalog config is intentionally minimal in the image (memory connector only)
+# so the image is reusable across deployments. Real catalogs (iceberg, hive,
+# jdbc) are mounted at /etc/trino/catalog/ by the deploying compose file.
+
+ARG RUNTIME_BASE_IMAGE
+FROM ${RUNTIME_BASE_IMAGE}
+
+ARG TRINO_VERSION
+ARG RELEASE_BASE_URL=https://github.com/kingfadzi/trino-el9/releases/download
+# Sha256 of the runtime tarball. Optional but recommended: passing it from
+# build-release.sh both pins the asset content and busts BuildKit's cache
+# when the tarball changes under an unchanged URL.
+ARG RUNTIME_TARBALL_SHA256=
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ARG NO_PROXY=
+ARG CORP_CA_BUNDLE=Dockerfile.runtime
+
+ENV HTTP_PROXY=$HTTP_PROXY \
+    HTTPS_PROXY=$HTTPS_PROXY \
+    NO_PROXY=$NO_PROXY \
+    http_proxy=$HTTP_PROXY \
+    https_proxy=$HTTPS_PROXY \
+    no_proxy=$NO_PROXY \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    JAVA_HOME=/usr/lib/jvm/jre-21-openjdk \
+    PATH="/opt/trino/bin:/usr/lib/jvm/jre-21-openjdk/bin:${PATH}"
+
+# Java 21 LTS from EL9 AppStream + minimal runtime tools. python3 is required
+# by trino's `launcher` script (it's a python wrapper around `java`).
+RUN dnf -y install --setopt=install_weak_deps=False \
+      java-21-openjdk-headless \
+      python3 \
+      ca-certificates curl tar gzip less \
+ && dnf clean all \
+ && java -version
+
+# Optional corporate CA bundle (defaults to copying this Dockerfile -- no-op).
+COPY ${CORP_CA_BUNDLE} /tmp/corp-ca.pem
+RUN if grep -q 'BEGIN CERTIFICATE' /tmp/corp-ca.pem 2>/dev/null; then \
+      cp /tmp/corp-ca.pem /etc/pki/ca-trust/source/anchors/corp-ca.pem && \
+      update-ca-trust; \
+    fi
+
+# Pull the prebuilt trino-server tarball and extract to /opt/trino.
+WORKDIR /opt
+RUN set -eux; \
+    : "${TRINO_VERSION:?TRINO_VERSION build-arg required}"; \
+    TAG="trino-v${TRINO_VERSION}-el9"; \
+    TAR="trino-server-${TRINO_VERSION}-el9.tar.gz"; \
+    BASE="${RELEASE_BASE_URL}/${TAG}"; \
+    echo "Expected sha256: ${RUNTIME_TARBALL_SHA256:-<unset, will fall back to release SHA256SUMS>}"; \
+    curl -fsSL "${BASE}/${TAR}" -o /tmp/${TAR}; \
+    if [ -n "${RUNTIME_TARBALL_SHA256}" ]; then \
+      echo "${RUNTIME_TARBALL_SHA256}  /tmp/${TAR}" | sha256sum -c -; \
+    else \
+      curl -fsSL "${BASE}/SHA256SUMS" -o /tmp/SHA256SUMS; \
+      ( cd /tmp && grep " ${TAR}\$" SHA256SUMS | sha256sum -c - ); \
+      rm -f /tmp/SHA256SUMS; \
+    fi; \
+    tar -xzf /tmp/${TAR} -C /opt; \
+    mv /opt/trino-server-${TRINO_VERSION} /opt/trino; \
+    rm -f /tmp/${TAR}
+
+# Non-root trino user + writable runtime dirs.
+RUN groupadd -r -g 1000 trino \
+ && useradd -r -u 1000 -g trino -d /var/lib/trino -s /sbin/nologin trino \
+ && mkdir -p /etc/trino/catalog /var/lib/trino/data /var/log/trino \
+ && chown -R trino:trino /opt/trino /etc/trino /var/lib/trino /var/log/trino
+
+# Config templates. /etc/trino/catalog/ is meant to be overridden by a volume
+# mount on the deploying compose; the memory connector here is just enough
+# for `SELECT 1` smoke tests.
+COPY conf/node.properties      /etc/trino/node.properties
+COPY conf/config.properties    /etc/trino/config.properties
+COPY conf/jvm.config           /etc/trino/jvm.config
+COPY conf/log.properties       /etc/trino/log.properties
+COPY conf/catalog/             /etc/trino/catalog/
+RUN chown -R trino:trino /etc/trino
+
+USER trino
+EXPOSE 8080
+WORKDIR /opt/trino
+
+# `launcher run` keeps trino in the foreground (needed for docker).
+ENTRYPOINT ["/opt/trino/bin/launcher", "--etc-dir=/etc/trino", "run"]
