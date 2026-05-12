@@ -46,7 +46,7 @@ ENV HTTP_PROXY=$HTTP_PROXY \
 
 # Java 21 LTS from EL9 AppStream + minimal runtime tools. python3 is required
 # by trino's `launcher` script (it's a python wrapper around `java`).
-RUN dnf -y install --setopt=install_weak_deps=False \
+RUN dnf -y install --allowerasing --setopt=install_weak_deps=False \
       java-21-openjdk-headless \
       python3 \
       ca-certificates curl tar gzip less \
