@@ -24,6 +24,10 @@ FROM ${RUNTIME_BASE_IMAGE}
 
 ARG TRINO_VERSION
 ARG RELEASE_BASE_URL=https://github.com/kingfadzi/trino-el9/releases/download
+# Override the computed release tag when the same TRINO_VERSION has
+# multiple el9 cuts (e.g. v466-el9, v466-el9.1, ...). Defaults to
+# `trino-v${TRINO_VERSION}-el9` to preserve backward compatibility.
+ARG TRINO_RELEASE_TAG=
 # Sha256 of the runtime tarball. Optional but recommended: passing it from
 # build-release.sh both pins the asset content and busts BuildKit's cache
 # when the tarball changes under an unchanged URL.
@@ -77,7 +81,7 @@ RUN if grep -q 'BEGIN CERTIFICATE' /tmp/corp-ca.pem 2>/dev/null; then \
 WORKDIR /opt
 RUN set -eux; \
     : "${TRINO_VERSION:?TRINO_VERSION build-arg required}"; \
-    TAG="trino-v${TRINO_VERSION}-el9"; \
+    TAG="${TRINO_RELEASE_TAG:-trino-v${TRINO_VERSION}-el9}"; \
     TAR="trino-server-${TRINO_VERSION}-el9.tar.gz"; \
     BASE="${RELEASE_BASE_URL}/${TAG}"; \
     echo "Expected sha256: ${RUNTIME_TARBALL_SHA256:-<unset, will fall back to release SHA256SUMS>}"; \
