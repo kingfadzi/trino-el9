@@ -65,7 +65,8 @@ RUNTIME_TAR="trino-server-${TRINO_VERSION}-el9.tar.gz"
 RUNTIME_IMAGE_TAG="${REGISTRY_IMAGE}:${TRINO_VERSION}-el9"
 RELEASE_BASE_URL="https://github.com/${GH_REPO}/releases/download"
 
-# Connectors to keep. Anything in plugin/ NOT matching one of these is removed.
+# Connectors / event listeners to keep. Anything in plugin/ NOT matching
+# one of these is removed.
 KEEP_PLUGINS=(
   iceberg
   hive
@@ -81,6 +82,14 @@ KEEP_PLUGINS=(
   session-property-managers
   http-server
   http-event-listener
+  # OpenLineage event listener. Emits an event per Trino query so dbt
+  # model runs, Lightdash chart loads, Cube semantic queries all show
+  # up in the lineage graph. The plugin dir bundles 53 transitive-dep
+  # jars (~24MB) because Maven Central publishes only the main jar
+  # without its deps. Trino's tarball uses hardlinks across plugins
+  # for dedupe; the strip pass below preserves them because we extract
+  # the whole tree and only delete unwanted dirs.
+  openlineage
 )
 
 die() { echo "ERROR: $*" >&2; exit 1; }
