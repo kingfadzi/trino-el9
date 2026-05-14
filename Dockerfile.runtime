@@ -45,28 +45,26 @@ ENV HTTP_PROXY=$HTTP_PROXY \
     no_proxy=$NO_PROXY \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    JAVA_HOME=/usr/lib/jvm/temurin-25-jdk \
-    PATH="/opt/trino/bin:/usr/lib/jvm/temurin-25-jdk/bin:${PATH}"
+    JAVA_HOME=/usr/lib/jvm/jre-25 \
+    PATH="/opt/trino/bin:/usr/lib/jvm/jre-25/bin:${PATH}"
 
-# Java 25 (LTS) from Eclipse Temurin. EL9 AppStream caps at Java 21, but
-# Trino 463+ requires Java 22+. Temurin ships RPMs for EL9/UBI9.
-# Override JAVA_REPO_BASEURL on prem to point at an internal mirror.
-ARG JAVA_REPO_BASEURL=https://packages.adoptium.net/artifactory/rpm/rhel/9/x86_64
-ARG JAVA_REPO_GPG=https://packages.adoptium.net/artifactory/api/gpg/key/public
-
-# python3 is required by trino's `launcher` script (it's a python wrapper
+# Java 25 (LTS) -- Trino 463+ requires Java 22+. EL9 AppStream now ships
+# java-25-openjdk directly (verified on almalinux:9 and ubi9: AppStream
+# carries 1:25.0.3.x-1.el9 as of 2026-05). No external Adoptium RPM repo,
+# no GPG key import, no egress beyond the base image's own repos -- which
+# on prem are already mirrored internally. Earlier cuts of this image
+# pulled temurin-25-jdk from packages.adoptium.net; that's no longer
+# needed now that 25 is an LTS in the distro AppStream.
+#
+# -headless: no AWT/Swing/X11. Trino is a server; the GUI libs are dead
+# weight (~50MB) and drag in extra deps.
+#
+# python3 is required by trino's `launcher` script (a python wrapper
 # around `java`).
 RUN dnf -y install --allowerasing --setopt=install_weak_deps=False \
-      ca-certificates curl \
- && curl -fsSL "${JAVA_REPO_GPG}" -o /tmp/adoptium.gpg \
- && rpm --import /tmp/adoptium.gpg \
- && rm -f /tmp/adoptium.gpg \
- && printf '[Adoptium]\nname=Adoptium\nbaseurl=%s\nenabled=1\ngpgcheck=1\ngpgkey=%s\n' \
-      "${JAVA_REPO_BASEURL}" "${JAVA_REPO_GPG}" > /etc/yum.repos.d/adoptium.repo \
- && dnf -y install --allowerasing --setopt=install_weak_deps=False \
-      temurin-25-jdk \
+      java-25-openjdk-headless \
       python3 \
-      tar gzip less \
+      ca-certificates curl tar gzip less \
  && dnf clean all \
  && java -version
 
